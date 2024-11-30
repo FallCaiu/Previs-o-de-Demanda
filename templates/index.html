@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gerenciamento de Chamados</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1>Gerenciamento de Chamados</h1>
+
+        <div class="mt-4">
+            <button class="btn btn-primary" onclick="mostrarFormulario()">Abrir Chamado</button>
+            <button class="btn btn-secondary" onclick="listarChamados()">Ver Chamados</button>
+        </div>
+
+        <!-- Previsão de Demanda -->
+        <div class="mt-4">
+            <h3>Previsão de Demanda</h3>
+            <form id="previsaoForm">
+                <div class="mb-3">
+                    <label for="mes" class="form-label">Mês (YYYY-MM)</label>
+                    <input type="month" id="mes" name="mes" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label for="categoria" class="form-label">Categoria</label>
+                    <select id="categoria" name="categoria" class="form-control" required>
+                        <option value="Rede">Rede</option>
+                        <option value="Software">Software</option>
+                        <option value="Hardware">Hardware</option>
+                    </select>
+                </div>
+                <button type="button" class="btn btn-primary" onclick="preverDemanda()">Prever Demanda</button>
+            </form>
+
+            <div id="previsaoResultado" class="mt-4" style="display: none;">
+                <h4>Resultado da Previsão:</h4>
+                <p id="resultadoPrevisao"></p>
+            </div>
+        </div>
+
+        <!-- Formulário de Abertura de Chamado -->
+        <div id="formulario" class="mt-4" style="display: none;">
+            <h3>Abrir Chamado</h3>
+            <form id="chamadoForm">
+                <div class="mb-3">
+                    <label for="nome" class="form-label">Nome</label>
+                    <input type="text" id="nome" name="nome" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label for="categoria" class="form-label">Categoria</label>
+                    <select id="categoria" name="categoria" class="form-control" required>
+                        <option value="Rede">Rede</option>
+                        <option value="Software">Software</option>
+                        <option value="Hardware">Hardware</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label for="prioridade" class="form-label">Prioridade</label>
+                    <select id="prioridade" name="prioridade" class="form-control" required>
+                        <option value="Baixa">Baixa</option>
+                        <option value="Média">Média</option>
+                        <option value="Alta">Alta</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label for="descricao" class="form-label">Descrição</label>
+                    <textarea id="descricao" name="descricao" class="form-control" required></textarea>
+                </div>
+                <button type="button" class="btn btn-success" onclick="abrirChamado()">Abrir Chamado</button>
+            </form>
+        </div>
+
+        <!-- Lista de Chamados -->
+        <div id="listaChamados" class="mt-4" style="display: none;">
+            <h3>Chamados</h3>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Nome</th>
+                        <th>Categoria</th>
+                        <th>Prioridade</th>
+                        <th>Status</th>
+                        <th>Abertura</th>
+                        <th>Fechamento</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody id="tabelaChamados"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        function mostrarFormulario() {
+            document.getElementById("formulario").style.display = "block";
+            document.getElementById("listaChamados").style.display = "none";
+        }
+
+        function listarChamados() {
+            document.getElementById("formulario").style.display = "none";
+            document.getElementById("listaChamados").style.display = "block";
+
+            fetch('/listar_chamados')
+                .then(response => response.json())
+                .then(data => {
+                    const tabela = document.getElementById("tabelaChamados");
+                    tabela.innerHTML = '';
+                    data.forEach(chamado => {
+                        tabela.innerHTML += `
+                            <tr>
+                                <td>${chamado[0]}</td>
+                                <td>${chamado[1]}</td>
+                                <td>${chamado[2]}</td>
+                                <td>${chamado[3]}</td>
+                                <td>${chamado[4]}</td>
+                                <td>${chamado[5]}</td>
+                                <td>${chamado[6] || 'Em Aberto'}</td>
+                                <td>
+                                    ${chamado[4] === 'Aberto' 
+                                        ? `<button class="btn btn-sm btn-success" onclick="fecharChamado(${chamado[0]})">Fechar</button>` 
+                                        : ''}
+                                </td>
+                            </tr>
+                        `;
+                    });
+                });
+        }
+
+        function abrirChamado() {
+            const formData = new FormData(document.getElementById("chamadoForm"));
+            fetch('/abrir_chamado', {
+                method: 'POST',
+                body: formData
+            }).then(response => response.json())
+              .then(data => {
+                  alert(data.message);
+                  document.getElementById("chamadoForm").reset();
+              });
+        }
+
+        function fecharChamado(id) {
+            fetch('/fechar_chamado', {
+                method: 'POST',
+                body: new URLSearchParams({ id })
+            }).then(response => response.json())
+              .then(data => {
+                  alert(data.message);
+                  listarChamados();
+              });
+        }
+
+        function preverDemanda() {
+            const mes = document.getElementById("mes").value;
+            const categoria = document.getElementById("categoria").value;
+
+            if (!mes) {
+                alert("Por favor, selecione um mês válido.");
+                return;
+            }
+
+            fetch(`/prever_demanda?mes=${mes}&categoria=${categoria}`)
+                .then(response => response.json())
+                .then(data => {
+                    // Exibe o resultado de forma formatada
+                    document.getElementById("previsaoResultado").style.display = "block";
+                    document.getElementById("resultadoPrevisao").innerHTML = `
+                        <strong>Previsão de demanda para ${categoria} no mês ${mes}:</strong> ${data.demanda_prevista} chamados.
+                    `;
+                })
+                .catch(error => {
+                    alert("Erro ao prever demanda: " + error);
+                });
+        }
+    </script>
+</body>
+</html>
