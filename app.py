@@ -1,10 +1,12 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 from datetime import datetime, timedelta
 import sqlite3
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 import random
+import io
+import matplotlib.pyplot as plt
 
 app = Flask(__name__)
 
@@ -28,11 +30,7 @@ def init_db():
             )
         """)
         conn.commit()
-        
-        # Exclui os dados antigos antes de inserir os novos
         excluir_dados_antigos()
-
-        # Inserir dados de exemplo com datas aleatórias
         inserir_dados_exemplo()
 
 def excluir_dados_antigos():
@@ -43,7 +41,7 @@ def excluir_dados_antigos():
         conn.commit()
 
 def inserir_dados_exemplo():
-    """Insere dados de exemplo com datas de abertura aleatórias e mais variações"""
+    """Insere dados de exemplo com maior variabilidade e sazonalidade"""
     nomes = [
         "Carlos Silva", "Maria Oliveira", "Pedro Santos", "Ana Costa", "Juliana Pereira",
         "Roberto Alves", "Lucas Martins", "Fernanda Rocha", "Marcos Souza", "Raquel Lima",
@@ -62,14 +60,16 @@ def inserir_dados_exemplo():
         "Falha no disco rígido do servidor"
     ]
     
-    # Gerar 100 registros com datas aleatórias para aumentar a variabilidade dos dados
+    meses_com_alta_demanda = [1, 6, 11]  # Janeiro, Junho, Novembro
+    num_registros = 1000  # Aumentar para 1000 registros
+
     dados = []
-    for _ in range(100):
+    for _ in range(num_registros):
         nome = random.choice(nomes)
         categoria = random.choice(categorias)
         prioridade = random.choice(prioridades)
         descricao = random.choice(descricoes)
-        data_abertura = gerar_data_aleatoria()
+        data_abertura = gerar_data_aleatoria(meses_com_alta_demanda)
         dados.append((nome, categoria, prioridade, descricao, data_abertura))
 
     # Inserir dados no banco de dados
@@ -81,31 +81,20 @@ def inserir_dados_exemplo():
         """, dados)
         conn.commit()
 
-def gerar_data_aleatoria():
-    """Gera uma data aleatória dentro de um intervalo de 2 anos"""
-    # Data de 2 anos atrás até hoje
+def gerar_data_aleatoria(meses_com_alta_demanda):
+    """Gera uma data aleatória dentro de um intervalo de 2 anos com sazonalidade"""
     data_inicio = datetime.now() - timedelta(days=730)
-    delta = timedelta(days=random.randint(0, 730))
-    return (data_inicio + delta).strftime("%Y-%m-%d %H:%M:%S")
+    delta_dias = random.randint(0, 730)
+    data_aleatoria = data_inicio + timedelta(days=delta_dias)
+    
+    if data_aleatoria.month in meses_com_alta_demanda:
+        multiplicador = random.choices([1, 2, 3], weights=[50, 30, 20])[0]  # Pesos para maior frequência
+        data_aleatoria += timedelta(days=random.randint(0, multiplicador * 10))
+    
+    return data_aleatoria.strftime("%Y-%m-%d %H:%M:%S")
 
 # Inicializa o banco de dados com dados aleatórios
 init_db()
-
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-@app.route("/abrir_chamado", methods=["POST"])
-def abrir_chamado():
-    data = request.form
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO chamados (nome, categoria, prioridade, descricao)
-            VALUES (?, ?, ?, ?)
-        """, (data["nome"], data["categoria"], data["prioridade"], data["descricao"]))
-        conn.commit()
-    return jsonify({"message": "Chamado aberto com sucesso!"})
 
 @app.route("/listar_chamados")
 def listar_chamados():
@@ -118,18 +107,9 @@ def listar_chamados():
         chamados = cursor.fetchall()
     return jsonify(chamados)
 
-@app.route("/fechar_chamado", methods=["POST"])
-def fechar_chamado():
-    chamado_id = request.form["id"]
-    data_fechamento = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE chamados SET status = 'Fechado', data_fechamento = ?
-            WHERE id = ?
-        """, (data_fechamento, chamado_id))
-        conn.commit()
-    return jsonify({"message": "Chamado fechado com sucesso!"})
+@app.route("/")
+def index():
+    return render_template("index.html")
 
 @app.route("/prever_demanda")
 def prever_demanda():
@@ -137,41 +117,30 @@ def prever_demanda():
         mes = request.args.get("mes")  # Mês no formato YYYY-MM
         categoria = request.args.get("categoria")  # Categoria (Rede, Software, Hardware)
 
-        # Verificar se os parâmetros estão corretos
         if not mes or not categoria:
             return jsonify({"error": "Parâmetros 'mes' e 'categoria' são obrigatórios"}), 400
         
         # Recupera os dados históricos do banco de dados
         with sqlite3.connect(DB_PATH) as conn:
             query = """
-                SELECT strftime('%Y-%m', data_abertura) AS ano_mes, categoria, COUNT(*)
+                SELECT strftime('%Y-%m', data_abertura) AS ano_mes, categoria, COUNT(*) as chamados
                 FROM chamados
                 GROUP BY strftime('%Y-%m', data_abertura), categoria
-                """
+            """
             df = pd.read_sql(query, conn)
         
         # Filtra os dados para a categoria selecionada
         df_categoria = df[df["categoria"] == categoria]
 
-        # Se não houver dados para a categoria selecionada
-        if df_categoria.empty:
-            return jsonify({"error": f"Nenhum dado encontrado para a categoria '{categoria}'"}), 400
-        
-        # Verifica a quantidade de dados disponíveis para a categoria
-        num_registros = len(df_categoria)
-        
-        # Se houver poucos dados, avisa que o modelo pode ser impreciso
-        if num_registros < 5:
-            return jsonify({"warning": "Dados históricos insuficientes para previsão precisa. Retornando a média dos chamados."}), 200
+        if len(df_categoria) < 5:
+            return jsonify({"warning": "Dados históricos insuficientes para previsão precisa."}), 200
 
-        # Converte o 'ano_mes' para datetime e extrai o mês como variável numérica
-        df_categoria["mes"] = pd.to_datetime(df_categoria["ano_mes"], format="%Y-%m")
-        
-        # Prepara os dados para o modelo de ML
-        df_categoria["ano_mes_int"] = df_categoria["mes"].apply(lambda x: x.year * 12 + x.month)  # Convertendo ano e mês para valor numérico
-        X = df_categoria[["ano_mes_int"]]  # Usando ano e mês como variável independente
-        y = df_categoria["COUNT(*)"]  # O número de chamados como variável dependente
-        
+        # Prepara os dados para o modelo
+        df_categoria["ano_mes"] = pd.to_datetime(df_categoria["ano_mes"])
+        df_categoria["ano_mes_int"] = df_categoria["ano_mes"].apply(lambda x: x.year * 12 + x.month)
+        X = df_categoria[["ano_mes_int"]]
+        y = df_categoria["chamados"]
+
         # Divisão dos dados em treinamento e teste
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
@@ -180,20 +149,57 @@ def prever_demanda():
         modelo.fit(X_train, y_train)
 
         # Convertendo o mês solicitado para a variável numérica correspondente
-        try:
-            mes_int = datetime.strptime(mes, "%Y-%m")
-            mes_int = mes_int.year * 12 + mes_int.month
-        except ValueError:
-            return jsonify({"error": "Formato do mês inválido. Use o formato YYYY-MM."}), 400
+        mes_int = datetime.strptime(mes, "%Y-%m")
+        mes_int = mes_int.year * 12 + mes_int.month
 
-        # Se o mês solicitado não estiver presente nos dados históricos, usa o modelo para prever
+        # Previsão
         demanda_prevista = modelo.predict([[mes_int]])[0]
 
         return jsonify({"demanda_prevista": int(demanda_prevista)})
 
     except Exception as e:
-        print("Erro ao prever demanda:", e)  # Log do erro no terminal
+        print("Erro ao prever demanda:", e)
         return jsonify({"error": "Erro ao prever demanda", "details": str(e)}), 500
+
+@app.route("/grafico_categoria/<categoria>")
+def grafico_categoria(categoria):
+    try:
+        # Conectar ao banco de dados e carregar os dados
+        with sqlite3.connect(DB_PATH) as conn:
+            query = """
+                SELECT strftime('%Y-%m', data_abertura) AS ano_mes, categoria, COUNT(*) as chamados
+                FROM chamados
+                GROUP BY strftime('%Y-%m', data_abertura), categoria
+            """
+            df = pd.read_sql(query, conn)
+
+        if df.empty or categoria not in df["categoria"].unique():
+            return jsonify({"error": f"Nenhum dado encontrado para a categoria '{categoria}'"}), 404
+
+        # Filtrar e preparar os dados
+        df["ano_mes"] = pd.to_datetime(df["ano_mes"], format='%Y-%m')
+        df_categoria = df[df["categoria"] == categoria]
+
+        # Geração do gráfico
+        plt.figure(figsize=(10, 6))
+        plt.plot(df_categoria["ano_mes"], df_categoria["chamados"], marker="o", label="Chamados")
+        plt.title(f"Gráfico de Chamados - Categoria: {categoria}", fontsize=16)
+        plt.xlabel("Mês", fontsize=14)
+        plt.ylabel("Número de Chamados", fontsize=14)
+        plt.legend(fontsize=12)
+        plt.grid(alpha=0.3)
+        plt.tight_layout()
+
+        # Salvar e retornar gráfico
+        img = io.BytesIO()
+        plt.savefig(img, format='png')
+        img.seek(0)
+        plt.close()
+        return send_file(img, mimetype='image/png')
+
+    except Exception as e:
+        print(f"Erro ao gerar gráfico: {e}")
+        return jsonify({"error": "Erro ao gerar gráfico", "details": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=True)

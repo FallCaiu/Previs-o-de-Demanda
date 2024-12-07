@@ -91,6 +91,28 @@
                 <tbody id="tabelaChamados"></tbody>
             </table>
         </div>
+
+        <!-- Gráfico de Previsão -->
+        <div class="mt-4">
+            <h3>Gráfico de Previsão</h3>
+            <form id="graficoForm" onsubmit="mostrarGrafico(); return false;">
+                <div class="mb-3">
+                    <label for="categoriaGrafico" class="form-label">Categoria</label>
+                    <select id="categoriaGrafico" name="categoria" class="form-control" required>
+                        <option value="Rede">Rede</option>
+                        <option value="Software">Software</option>
+                        <option value="Hardware">Hardware</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary">Gerar Gráfico</button>
+            </form>
+
+            <div class="mt-4" id="graficoContainer" style="display: none;">
+                <h4>Gráfico para Categoria: <span id="graficoTitulo"></span></h4>
+                <img id="graficoImagem" class="img-fluid border rounded shadow">
+            </div>
+        </div>
+
     </div>
 
     <script>
@@ -173,6 +195,17 @@
                 .catch(error => {
                     alert("Erro ao prever demanda: " + error);
                 });
+        }
+
+        function mostrarGrafico() {
+            const categoria = document.getElementById("categoriaGrafico").value;
+            const graficoContainer = document.getElementById("graficoContainer");
+            const graficoImagem = document.getElementById("graficoImagem");
+            const graficoTitulo = document.getElementById("graficoTitulo");
+
+            graficoTitulo.textContent = categoria;
+            graficoImagem.src = `/grafico_categoria/${categoria}`;
+            graficoContainer.style.display = "block";
         }
     </script>
 </body>
